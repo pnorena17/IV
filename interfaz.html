@@ -1,151 +1,67 @@
 #include <WiFi.h>
-#include <WebServer.h>
+#include <HTTPClient.h>
 
-// --- NO CAMBIES ESTA PARTE ---
+// Configura tu Wi-Fi
 const char* ssid = "Comunidad_UNMED";
 const char* password = "wifi_med_213";
 
-WebServer server(80);
+// Token de GitHub (reemplaza con tu token)
+const char* githubToken = "tu_token_de_acceso_personal";
 
-String foodWeight = "0";
-String waterLevel = "0";
-
-const int minFoodLevel = 50;
-const int minWaterLevel = 100;
-
-#define RXD2 16
-#define TXD2 17
-// ---------------------------------
+// Nombre de tu repositorio
+const char* userName = "tu_usuario";
+const char* repoName = "tu_repo";
+const char* filePath = "index.html"; // El archivo que deseas actualizar
 
 void setup() {
-  Serial.begin(9600);
-  Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
+  Serial.begin(115200);
 
+  // Conectar a WiFi
   WiFi.begin(ssid, password);
-  Serial.println("Conectando a WiFi...");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nConectado: " + WiFi.localIP().toString());
+  Serial.println("\nConectado a WiFi");
 
-  server.on("/", handleRoot);
-  server.on("/dispense_food", handleDispenseFood);
-  server.on("/dispense_water", handleDispenseWater);
-  server.on("/disable_food_control", handleDisableFoodControl);
-  server.on("/enable_food_control", handleEnableFoodControl);
-  server.on("/disable_water_control", handleDisableWaterControl);
-  server.on("/enable_water_control", handleEnableWaterControl);
-  server.on("/set_minimums", handleSetMinimums);
-  server.begin();
+  // Realizar la solicitud a la API de GitHub para hacer un commit
+  updateGitHubFile("Nuevo contenido en la página");
 }
 
 void loop() {
-  server.handleClient();
-  if (Serial2.available()) {
-    String data = Serial2.readStringUntil('\n');
-    parseSensorData(data);
+  // Aquí va tu lógica habitual para el ESP32, por ejemplo, recibir datos o controlar dispositivos
+}
+
+// Función para realizar el commit en GitHub
+void updateGitHubFile(const String& newContent) {
+  // URL de la API de GitHub para hacer un commit
+  String url = "https://api.github.com/repos/" + String(userName) + "/" + String(repoName) + "/contents/" + String(filePath);
+
+  // Inicia la solicitud HTTP
+  HTTPClient http;
+  http.begin(url);
+
+  // Configura la cabecera de la solicitud para la autenticación
+  http.addHeader("Authorization", "token " + String(githubToken));
+  http.addHeader("Content-Type", "application/json");
+
+  // Formato JSON de la solicitud para actualizar el archivo
+  String jsonBody = "{\"message\":\"Actualización del archivo desde ESP32\",\"content\":\"" + base64::encode(newContent) + "\",\"branch\":\"main\"}";
+
+  // Realiza el PUT request para hacer el commit
+  int httpResponseCode = http.PUT(jsonBody);
+
+  // Verifica la respuesta de la API
+  if (httpResponseCode > 0) {
+    Serial.print("Código HTTP: ");
+    Serial.println(httpResponseCode);
+    String payload = http.getString();
+    Serial.println(payload);
+  } else {
+    Serial.print("Error al enviar solicitud HTTP: ");
+    Serial.println(httpResponseCode);
   }
-}
 
-// --- FUNCIÓN CORREGIDA ---
-void handleRoot() {
-  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
-  html += "<title>Alimentador Automático</title>";
-  html += "<style>body{font-family:sans-serif;text-align:center;}</style>";
-  
-  // **AÑADIMOS EL SCRIPT DE JAVASCRIPT**
-  html += "<script>";
-  html += "function dispenseFood(){ var amount = document.getElementById('foodAmount').value; location.href = '/dispense_food?foodAmount=' + amount; }";
-  html += "function dispenseWater(){ var amount = document.getElementById('waterAmount').value; location.href = '/dispense_water?waterAmount=' + amount; }";
-  html += "function setMinimums(){ var minFood = document.getElementById('minFood').value; var minWater = document.getElementById('minWater').value; location.href = '/set_minimums?minFood=' + minFood + '&minWater=' + minWater; }";
-  html += "</script>";
-  
-  html += "</head><body>";
-  html += "<h1>Estado del Alimentador Automático</h1>";
-  html += "<p><strong>Comida:</strong> " + foodWeight + " g</p>";
-  html += "<p><strong>Agua:</strong> " + waterLevel + " cm</p>";
-  
-  html += "<button class='button' onclick='location.href=\"/enable_food_control\"'>Habilitar Control Comida</button>";
-  html += "<button class='button' onclick='location.href=\"/disable_food_control\"'>Inhabilitar Control Comida</button><br><br>";
-  
-  html += "<button class='button' onclick='location.href=\"/enable_water_control\"'>Habilitar Control Agua</button>";
-  html += "<button class='button' onclick='location.href=\"/disable_water_control\"'>Inhabilitar Control Agua</button>";
-  
-  html += "<h3>Dispensar Comida</h3>";
-  html += "<input type='number' id='foodAmount' placeholder='Cantidad (g)'> <button class='button' onclick='dispenseFood()'>Dispensar comida</button>";
-  
-  html += "<h3>Dispensar Agua</h3>";
-  html += "<input type='number' id='waterAmount' placeholder='Cantidad (1, 2 o 3 cm)'> <button class='button' onclick='dispenseWater()'>Dispensar agua</button>";
-  
-  html += "<div class='config-container'>";
-  html += "<h3>Configurar Mínimos</h3>";
-  html += "<label for='minFood'>Mínimo de comida (g):</label> ";
-  html += "<input type='number' id='minFood'><br><br>";
-  html += "<label for='minWater'>Mínimo de agua (0, 1, 2 cm):</label> ";
-  html += "<input type='number' id='minWater'><br><br>";
-  html += "<button class='button' onclick='setMinimums()'>Configurar Mínimos</button>";
-  html += "</div>";
-  
-  html += "</body></html>";
-  server.send(200, "text/html", html);
+  // Finaliza la solicitud HTTP
+  http.end();
 }
-// ----------------------------
-
-// --- NO CAMBIES ESTA PARTE ---
-void handleDispenseFood() {
-  String foodAmount = server.arg("foodAmount");
-  Serial2.println("DISPENSE_FOOD:" + foodAmount);
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleDispenseWater() {
-  String waterAmount = server.arg("waterAmount");
-  Serial2.println("DISPENSE_WATER:" + waterAmount);
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleDisableFoodControl() {
-  Serial2.println("DISABLE_FOOD_CONTROL");
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleEnableFoodControl() {
-  Serial2.println("ENABLE_FOOD_CONTROL");
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleDisableWaterControl() {
-  Serial2.println("DISABLE_WATER_CONTROL");
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleEnableWaterControl() {
-  Serial2.println("ENABLE_WATER_CONTROL");
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleSetMinimums() {
-  String minFood = server.arg("minFood");
-  String minWater = server.arg("minWater");
-  Serial2.println("SET_MIN_FOOD:" + minFood);
-  Serial2.println("SET_MIN_WATER:" + minWater);
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void parseSensorData(String data) {
-  int fIndex = data.indexOf("FOOD:");
-  int wIndex = data.indexOf("WATER:");
-  if (fIndex != -1 && wIndex != -1) {
-    foodWeight = data.substring(fIndex + 5, data.indexOf(',', fIndex));
-    waterLevel = data.substring(wIndex + 6);
-  }
-}
-// ---------------------------------
